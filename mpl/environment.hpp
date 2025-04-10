@@ -40,14 +40,16 @@ namespace mpl {
             int is_initialized{0};
             MPI_Initialized(&is_initialized);
             is_externally_initialized_ = is_initialized != 0;
-            if (is_externally_initialized_)
+            if (is_initialized)
               MPI_Query_thread(&thread_mode_);
             else
               MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &thread_mode_);
           }
 
           ~initializer() {
-            if (not is_externally_initialized_)
+            int is_finalized{0};
+            MPI_Finalized(&is_finalized);
+            if (!is_finalized)
               MPI_Finalize();
           }
 
