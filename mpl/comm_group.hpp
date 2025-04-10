@@ -11,6 +11,7 @@
 #include <mpl/command_line.hpp>
 #include <mpl/info.hpp>
 
+
 namespace mpl {
 
   class group;
@@ -398,7 +399,6 @@ namespace mpl {
       }
 
       MPI_Comm comm_{MPI_COMM_NULL};
-      bool attached_ = false;
 
     public:
       /// Indicates the creation of a new communicator by an operation that is collective
@@ -435,30 +435,7 @@ namespace mpl {
       }
 
       ~base_communicator() {
-        destroy();
-      }
-
-      base_communicator &operator=(const base_communicator &other) noexcept {
-        if (this != &other) {
-          destroy();
-          MPI_Comm_dup(other.comm_, &comm_);
-        }
-        return *this;
-      }
-
-      base_communicator &operator=(base_communicator &&other) noexcept {
-        if (this != &other) {
-          destroy();
-          comm_ = other.comm_;
-          attached_ = other.attached_;
-          other.comm_ = MPI_COMM_NULL;
-          other.attached_ = false;  // not necessary, but for clarity
-        }
-        return *this;
-      }
-
-      void destroy() {
-        if (!attached_ && is_valid()) {
+        if (is_valid()) {
           int result_1;
           MPI_Comm_compare(comm_, MPI_COMM_WORLD, &result_1);
           int result_2;
@@ -466,7 +443,37 @@ namespace mpl {
           if (result_1 != MPI_IDENT and result_2 != MPI_IDENT)
             MPI_Comm_free(&comm_);
         }
-        attached_ = false;
+      }
+
+      base_communicator &operator=(const base_communicator &other) noexcept {
+        if (this != &other) {
+          if (is_valid()) {
+            int result_1;
+            MPI_Comm_compare(comm_, MPI_COMM_WORLD, &result_1);
+            int result_2;
+            MPI_Comm_compare(comm_, MPI_COMM_SELF, &result_2);
+            if (result_1 != MPI_IDENT and result_2 != MPI_IDENT)
+              MPI_Comm_free(&comm_);
+          }
+          MPI_Comm_dup(other.comm_, &comm_);
+        }
+        return *this;
+      }
+
+      base_communicator &operator=(base_communicator &&other) noexcept {
+        if (this != &other) {
+          if (is_valid()) {
+            int result_1;
+            MPI_Comm_compare(comm_, MPI_COMM_WORLD, &result_1);
+            int result_2;
+            MPI_Comm_compare(comm_, MPI_COMM_SELF, &result_2);
+            if (result_1 != MPI_IDENT and result_2 != MPI_IDENT)
+              MPI_Comm_free(&comm_);
+          }
+          comm_ = other.comm_;
+          other.comm_ = MPI_COMM_NULL;
+        }
+        return *this;
       }
 
       [[nodiscard]] int size() const {
@@ -4091,7 +4098,7 @@ namespace mpl {
 
     /// Constructs a new communicator from an existing one by spitting the communicator
     /// into disjoint subgroups each of which can create a shared memory region.
-    /// \tparam color_type color type, must be integral type
+    /// \tparam key_type color type, must be integral type
     /// \param split_shared_memory tag to indicate the mode of construction
     /// \param other the communicator
     /// \param key control of rank assignment
@@ -4131,17 +4138,6 @@ namespace mpl {
       return *this;
     }
 
-    void attach(MPI_Comm comm_c) {
-      destroy();
-      attached_ = true;
-      comm_ = comm_c;
-    }
-
-    template<typename T = MPI_Comm, std::enable_if_t<!std::is_same_v<T, int>, int> = 0>
-    void attach(int comm_f) {
-      attach(MPI_Comm_f2c(comm_f));
-    }
-
     /// Determines the total number of processes in a communicator.
     /// \return number of processes
     [[nodiscard]] int size() const {
@@ -4160,7 +4156,7 @@ namespace mpl {
       base::info(i);
     }
 
-    /// Get the the hints of the communicator.
+    /// Get the hints of the communicator.
     /// \return hints of the communicator
     [[nodiscard]] mpl::info info() const {
       return base::info();
@@ -4890,7 +4886,8 @@ namespace mpl {
     /// processes of this communicator and the new spawned processes
     /// \note This is a collective operation and must be called (possibly by utilizing another
     /// overload) by all processes in the communicator.
-    [[nodiscard]] inter_communicator spawn(int root_rank, int max_procs, const command_line &command) const;
+    [[nodiscard]] inter_communicator spawn(int root_rank, int max_procs,
+                                           const command_line &command) const;
 
     /// Spawns new processes and establishes communication.
     /// \param root_rank the root process, following arguments are ignored on non-root ranks
@@ -4901,8 +4898,9 @@ namespace mpl {
     /// processes of this communicator and the new spawned processes
     /// \note This is a collective operation and must be called (possibly by utilizing another
     /// overload) by all processes in the communicator.
-    [[nodiscard]] inter_communicator spawn(int root_rank, int max_procs, const command_line &command,
-                             const mpl::info &i) const;
+    [[nodiscard]] inter_communicator spawn(int root_rank, int max_procs,
+                                           const command_line &command,
+                                           const mpl::info &i) const;
 
     /// Spawns new processes and establishes communication, non-root variant.
     /// \param root_rank the root process
@@ -4919,7 +4917,8 @@ namespace mpl {
     /// processes of this communicator and the new spawned processes
     /// \note This is a collective operation and must be called (possibly by utilizing another
     /// overload) by all processes in the communicator.
-    [[nodiscard]] inter_communicator spawn_multiple(int root_rank, const command_lines &commands) const;
+    [[nodiscard]] inter_communicator spawn_multiple(int root_rank,
+                                                    const command_lines &commands) const;
 
     /// Spawns new processes and establishes communication.
     /// \param root_rank the root process, following arguments are ignored on non-root ranks
@@ -4930,8 +4929,9 @@ namespace mpl {
     /// processes of this communicator and the new spawned processes
     /// \note This is a collective operation and must be called (possibly by utilizing another
     /// overload) by all processes in the communicator.
-    [[nodiscard]] inter_communicator spawn_multiple(int root_rank, const command_lines &commands,
-                                      const mpl::infos &i) const;
+    [[nodiscard]] inter_communicator spawn_multiple(int root_rank,
+                                                    const command_lines &commands,
+                                                    const mpl::infos &i) const;
 
     /// Spawns new processes and establishes communication, non-root variant.
     /// \param root_rank the root process
@@ -4963,6 +4963,7 @@ namespace mpl {
   class inter_communicator : public impl::base_communicator {
     using base = impl::base_communicator;
 
+  protected:
     explicit inter_communicator(MPI_Comm comm) : base{comm} {
     }
 
@@ -5347,6 +5348,85 @@ namespace mpl {
   inline group::group(group::exclude_tag, const group &other, const ranks &rank) {
     MPI_Group_excl(other.gr_, rank.size(), rank(), &gr_);
   }
+
+  //--------------------------------------------------------------------
+
+  /// Specifies the communication context for a communication operation.
+  /// \note This is a non-owning wrapper around a raw MPI communicator. It is provided
+  /// for interoperability of MPL with MPI.
+  class mpi_communicator : public communicator {
+    using base = communicator;
+
+  public:
+    /// Creates a new communicator form an MPI communicator.
+    /// \param comm MPI communicator that will be wrapped
+    explicit mpi_communicator(MPI_Comm comm) : communicator{comm} {
+    }
+
+    mpi_communicator(const mpi_communicator &other) = delete;
+
+    /// Move-constructs a communicator.
+    /// \param other the other communicator to move from
+    mpi_communicator(mpi_communicator &&other) noexcept : base{other.comm_} {
+      other.comm_ = MPI_COMM_NULL;
+    }
+
+    /// Destructor.
+    ~mpi_communicator() {
+      comm_ = MPI_COMM_NULL;
+    }
+
+    mpi_communicator &operator=(const mpi_communicator &other) = delete;
+
+    /// Move-assigns a communicator.
+    /// \param other the other communicator to move from
+    /// \return this communicator
+    mpi_communicator &operator=(mpi_communicator &&other) noexcept {
+      comm_ = other.comm_;
+      other.comm_ = MPI_COMM_NULL;
+      return *this;
+    }
+  };
+
+  //--------------------------------------------------------------------
+
+  /// Specifies the communication context for a communication operation between two
+  /// non-overlapping groups.
+  /// \note This is a non-owning wrapper around a raw MPI communicator. It is provided
+  /// for interoperability of MPL with MPI.
+  class mpi_inter_communicator : public inter_communicator {
+    using base = inter_communicator;
+
+  public:
+    /// Creates a new inter-communicator form an MPI communicator.
+    /// \param comm MPI inter-communicator that will be wrapped
+    explicit mpi_inter_communicator(MPI_Comm comm) : inter_communicator{comm} {
+    }
+
+    mpi_inter_communicator(const mpi_communicator &other) = delete;
+
+    /// Move-constructs an inter-communicator.
+    /// \param other the other inter-communicator to move from
+    mpi_inter_communicator(mpi_inter_communicator &&other) noexcept : base{other.comm_} {
+      other.comm_ = MPI_COMM_NULL;
+    }
+
+    /// Destructor.
+    ~mpi_inter_communicator() {
+      comm_ = MPI_COMM_NULL;
+    }
+
+    mpi_inter_communicator &operator=(const mpi_inter_communicator &other) = delete;
+
+    /// Move-assigns an inter-communicator.
+    /// \param other the other communicator to move from
+    /// \return this communicator
+    mpi_inter_communicator &operator=(mpi_inter_communicator &&other) noexcept {
+      comm_ = other.comm_;
+      other.comm_ = MPI_COMM_NULL;
+      return *this;
+    }
+  };
 
 }  // namespace mpl
 

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <vector>
 
+
 namespace mpl {
 
   template<typename T>
@@ -1787,7 +1788,6 @@ namespace mpl {
     using base::operator[];
     using base::size;
     using base::push_back;
-    using base::clear;
 
     friend class impl::base_communicator;
     friend class impl::topology_communicator;
