@@ -62,8 +62,8 @@ namespace mpl {
     /// Indicates that groups are identical, i.e., groups have same the members in same rank
     /// order.
     static constexpr equality_type identical = equality_type::identical;
-    /// Indicates that groups are similar, i.e., groups have same tha members in different rank
-    /// order.
+    /// Indicates that groups are similar, i.e., groups have the same members but in different
+    /// rank order.
     static constexpr equality_type similar = equality_type::similar;
     /// Indicates that groups are unequal, i.e., groups have different sets of members.
     static constexpr equality_type unequal = equality_type::unequal;
@@ -200,7 +200,7 @@ namespace mpl {
     /// \note This function returns a non-owning handle to the underlying MPI group, which may
     /// be useful when refactoring legacy MPI applications to MPL.
     /// \warning The handle must not be used to modify the MPI group that the handle points
-    /// to. This method will be removed in a future version.
+    /// to.
     [[nodiscard]] MPI_Group native_handle() const {
       return gr_;
     }
@@ -232,7 +232,7 @@ namespace mpl {
     }
 
     /// Determines the relative numbering of the same process in two different groups.
-    /// \param rank a set valid ranks in the given process group
+    /// \param rank a set of valid ranks in the given process group
     /// \param other process group
     /// \return corresponding ranks in this process group
     [[nodiscard]] ranks translate(const ranks &rank, const group &other) const {
@@ -287,7 +287,7 @@ namespace mpl {
 
       struct isend_irecv_state {
         MPI_Request req{};
-        isend_irecv_request_state *request_state;
+        isend_irecv_request_state *request_state{nullptr};
       };
 
       static int isend_irecv_query(void *state, MPI_Status *s) {
@@ -363,6 +363,14 @@ namespace mpl {
 #endif
       }
 
+      template<typename T>
+      void check_size([[maybe_unused]] const contiguous_layouts<T> &l) const {
+#if defined MPL_DEBUG
+        if (static_cast<int>(l.size()) > size())
+          throw invalid_size();
+#endif
+      }
+
       void check_size([[maybe_unused]] const displacements &d) const {
 #if defined MPL_DEBUG
         if (static_cast<int>(d.size()) > size())
@@ -396,6 +404,46 @@ namespace mpl {
       void check_container_size(const T &container) const {
         check_container_size(container,
                              typename detail::datatype_traits<T>::data_type_category{});
+      }
+
+      template<typename T>
+      std::vector<int> sizes_as_vector_of_ints(const contiguous_layouts<T> &layouts) const {
+        std::vector<int> counts;
+        counts.reserve(layouts.size());
+        std::transform(layouts.begin(), layouts.end(), std::back_inserter(counts),
+                       [](const auto &layout) { return static_cast<int>(layout.size()); });
+        return counts;
+      }
+
+      template<typename T>
+      std::vector<int> count_displacements_as_vector_of_ints(
+          const displacements &displs) const {
+        std::vector<int> displs_as_int;
+        displs_as_int.reserve(displs.size());
+        std::transform(displs.begin(), displs.end(), std::back_inserter(displs_as_int),
+                       [](const auto &displ) {
+#if defined MPL_DEBUG
+                         if (displ / sizeof(T) * sizeof(T) != displ or
+                             displ / sizeof(T) > std::numeric_limits<int>::max)
+                           throw invalid_displacement();
+#endif
+                         return static_cast<int>(displ / sizeof(T));
+                       });
+        return displs_as_int;
+      }
+
+      std::vector<int> byte_displacements_as_vector_of_ints(const displacements &displs) const {
+        std::vector<int> displs_as_int;
+        displs_as_int.reserve(displs.size());
+        std::transform(displs.begin(), displs.end(), std::back_inserter(displs_as_int),
+                       [](const auto &displ) {
+#if defined MPL_DEBUG
+                         if (displ > std::numeric_limits<int>::max())
+                           throw invalid_displacement();
+#endif
+                         return static_cast<int>(displ);
+                       });
+        return displs_as_int;
       }
 
       MPI_Comm comm_{MPI_COMM_NULL};
@@ -516,7 +564,7 @@ namespace mpl {
       /// \note This function returns a non-owning handle to the underlying MPI communicator,
       /// which may be useful when refactoring legacy MPI applications to MPL.
       /// \warning The handle must not be used to modify the MPI communicator that the handle
-      /// points to. This method will be removed in a future version.
+      /// points to.
       [[nodiscard]] MPI_Comm native_handle() const {
         return comm_;
       }
@@ -524,7 +572,7 @@ namespace mpl {
       /// Checks if a communicator is valid, i.e., is not an empty communicator with no
       /// associated process.
       /// \return true if communicator is valid
-      /// \note A default constructed communicator is a non valid communicator.
+      /// \note A default constructed communicator is a non-valid communicator.
       [[nodiscard]] bool is_valid() const {
         return comm_ != MPI_COMM_NULL;
       }
@@ -573,7 +621,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       void send(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -583,7 +631,7 @@ namespace mpl {
         send(data, destination, t, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Sends a message with a several values having a specific memory layout via a
+      /// Sends a message with several values having a specific memory layout via a
       /// blocking standard send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -599,7 +647,7 @@ namespace mpl {
                  static_cast<int>(t), comm_);
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// blocking standard send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -611,7 +659,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       void send(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -690,7 +738,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note Sending STL containers is a  convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       irequest isend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -721,7 +769,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// non-blocking standard send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -733,7 +781,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       /// \return request representing the ongoing message transfer
       template<typename iterT>
       irequest isend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
@@ -769,7 +817,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values having a specific memory layout via a blocking standard send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -789,7 +837,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values given by a pair of iterators via a blocking standard send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -802,7 +850,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return persistent communication request
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       prequest send_init(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -881,7 +929,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       void bsend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -891,7 +939,7 @@ namespace mpl {
         bsend(data, destination, t, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Sends a message with a several values having a specific memory layout via a
+      /// Sends a message with several values having a specific memory layout via a
       /// buffered send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim  section
@@ -907,7 +955,7 @@ namespace mpl {
                   static_cast<int>(t), comm_);
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// buffered send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -919,7 +967,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       void bsend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -978,9 +1026,7 @@ namespace mpl {
         MPI_Request req;
         MPI_Grequest_start(isend_irecv_query, isend_irecv_free, isend_irecv_cancel,
                            request_state, &req);
-        auto *send_state{new isend_irecv_state()};
-        send_state->req = req;
-        send_state->request_state = request_state;
+        auto *send_state{new isend_irecv_state{req, request_state}};
         std::thread thread([this, &data, destination, t, send_state]() {
           ibsend(data, destination, t, send_state, C{});
         });
@@ -998,7 +1044,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       /// \anchor communicator_ibsend
       template<typename T>
@@ -1030,7 +1076,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// non-blocking buffered send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1042,7 +1088,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       /// \return request representing the ongoing message transfer
       template<typename iterT>
       irequest ibsend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
@@ -1078,7 +1124,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values having a specific memory layout via a buffered send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1098,7 +1144,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values given by a pair of iterators via a buffered send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1111,7 +1157,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return persistent communication request
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       prequest bsend_init(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1161,7 +1207,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       void ssend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -1170,7 +1216,7 @@ namespace mpl {
         ssend(data, destination, t, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Sends a message with a several values having a specific memory layout via a
+      /// Sends a message with several values having a specific memory layout via a
       /// blocking synchronous send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1186,7 +1232,7 @@ namespace mpl {
                   static_cast<int>(t), comm_);
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// blocking synchronous send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1198,7 +1244,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       void ssend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1257,9 +1303,7 @@ namespace mpl {
         MPI_Request req;
         MPI_Grequest_start(isend_irecv_query, isend_irecv_free, isend_irecv_cancel,
                            request_state, &req);
-        auto *send_state{new isend_irecv_state()};
-        send_state->req = req;
-        send_state->request_state = request_state;
+        auto *send_state{new isend_irecv_state{req, request_state}};
         std::thread thread([this, &data, destination, t, send_state]() {
           issend(data, destination, t, send_state, C{});
         });
@@ -1278,7 +1322,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note Sending STL containers  is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       irequest issend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -1309,7 +1353,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// non-blocking synchronous send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1321,7 +1365,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       /// \return request representing the ongoing message transfer
       template<typename iterT>
       irequest issend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
@@ -1357,7 +1401,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values having a specific memory layout via a blocking synchronous send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1377,7 +1421,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values given by a pair of iterators via a blocking synchronous send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1390,7 +1434,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return persistent communication request
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       prequest ssend_init(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1440,7 +1484,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       void rsend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -1450,7 +1494,7 @@ namespace mpl {
         rsend(data, destination, t, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Sends a message with a several values having a specific memory layout via a
+      /// Sends a message with several values having a specific memory layout via a
       /// blocking ready send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1466,7 +1510,7 @@ namespace mpl {
                   static_cast<int>(t), comm_);
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// blocking ready send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1478,7 +1522,7 @@ namespace mpl {
       /// \param destination rank of the receiving process
       /// \param t tag associated to this message
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       void rsend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1537,9 +1581,7 @@ namespace mpl {
         MPI_Request req;
         MPI_Grequest_start(isend_irecv_query, isend_irecv_free, isend_irecv_cancel,
                            request_state, &req);
-        auto *send_state{new isend_irecv_state()};
-        send_state->req = req;
-        send_state->request_state = request_state;
+        auto *send_state{new isend_irecv_state{req, request_state}};
         std::thread thread([this, &data, destination, t, send_state]() {
           irsend(data, destination, t, send_state, C{});
         });
@@ -1557,7 +1599,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note Sending STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       irequest irsend(const T &data, int destination, tag_t t = tag_t{0}) const {
@@ -1588,7 +1630,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Sends a message with a several values given by a pair of iterators via a
+      /// Sends a message with several values given by a pair of iterators via a
       /// non-blocking ready send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1601,7 +1643,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       irequest irsend(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1636,7 +1678,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values having a specific memory layout via a blocking ready send operation.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1656,7 +1698,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to send a message with a several
+      /// Creates a persistent communication request to send a message with several
       /// values given by a pair of iterators via a blocking ready send operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1669,7 +1711,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return persistent communication request
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       prequest rsend_init(iterT begin, iterT end, int destination, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1740,7 +1782,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return status of the receive operation
       /// \note Receiving STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       /// \anchor communicator_recv
       template<typename T>
@@ -1750,7 +1792,7 @@ namespace mpl {
         return recv(data, source, t, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Receives a message with a several values having a specific memory layout.
+      /// Receives a message with several values having a specific memory layout.
       /// \tparam T type of the data to receive, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param data pointer to the data to receive
@@ -1768,7 +1810,7 @@ namespace mpl {
         return s;
       }
 
-      /// Receives a message with a several values given by a pair of iterators.
+      /// Receives a message with several values given by a pair of iterators.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
       /// href="https://en.cppreference.com/w/cpp/named_req/ForwardIterator">LegacyForwardIterator</a>,
@@ -1780,7 +1822,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return status of the receive operation
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       status_t recv(iterT begin, iterT end, int source, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1824,9 +1866,7 @@ namespace mpl {
         MPI_Request req;
         MPI_Grequest_start(isend_irecv_query, isend_irecv_free, isend_irecv_cancel,
                            request_state, &req);
-        auto *recv_state{new isend_irecv_state()};
-        recv_state->req = req;
-        recv_state->request_state = request_state;
+        auto *recv_state{new isend_irecv_state{req, request_state}};
         std::thread thread([this, &data, source, t, recv_state]() {
           irecv(data, source, t, recv_state, C{});
         });
@@ -1844,7 +1884,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing receive operation
       /// \note Receiving STL containers is a convenience feature, which may have non-optimal
-      /// performance characteristics. Use alternative overloads in performance critical code
+      /// performance characteristics. Use alternative overloads in performance-critical code
       /// sections.
       template<typename T>
       irequest irecv(T &data, int source, tag_t t = tag_t{0}) const {
@@ -1873,7 +1913,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Receives a message with a several values given by a pair of iterators via a
+      /// Receives a message with several values given by a pair of iterators via a
       /// non-blocking receive operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1886,7 +1926,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return request representing the ongoing message transfer
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       irequest irecv(iterT begin, iterT end, int source, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -1921,7 +1961,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to receive a message with a several
+      /// Creates a persistent communication request to receive a message with several
       /// values having a specific memory layout via a blocking standard send operation.
       /// \tparam T type of the data to receive, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -1940,7 +1980,7 @@ namespace mpl {
         return base_prequest{req};
       }
 
-      /// Creates a persistent communication request to receive a message with a several
+      /// Creates a persistent communication request to receive a message with several
       /// values given by a pair of iterators via a blocking receive operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -1953,7 +1993,7 @@ namespace mpl {
       /// \param t tag associated to this message
       /// \return persistent communication request
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       prequest recv_init(iterT begin, iterT end, int source, tag_t t = tag_t{0}) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -2049,7 +2089,7 @@ namespace mpl {
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section or an STL container
       /// that holds elements that comply with the mentioned requirements
       /// \param data value to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return status of the receive operation
       /// \note Receiving STL containers is not supported.
       template<typename T>
@@ -2057,13 +2097,13 @@ namespace mpl {
         return mrecv(data, m, typename detail::datatype_traits<T>::data_type_category{});
       }
 
-      /// Receives a message with a several values having a specific memory layout by a
+      /// Receives a message with several values having a specific memory layout by a
       /// message handle.
       /// \tparam T type of the data to receive, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param data pointer to the data to receive
       /// \param l memory layout of the data to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return status of the receive operation
       template<typename T>
       status_t mrecv(T *data, const layout<T> &l, message_t &m) const {
@@ -2073,7 +2113,7 @@ namespace mpl {
         return s;
       }
 
-      /// Receives a message with a several values given by a pair of iterators by a
+      /// Receives a message with several values given by a pair of iterators by a
       /// message handle.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -2082,10 +2122,10 @@ namespace mpl {
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param begin iterator pointing to the first data value to receive
       /// \param end iterator pointing one element beyond the last data value to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return status of the receive operation
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       status_t mrecv(iterT begin, iterT end, message_t &m) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -2115,7 +2155,7 @@ namespace mpl {
       /// \tparam T type of the data to receive, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param data pointer to the data to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return request representing the ongoing receive operation
       /// \note Receiving STL containers is not supported.
       template<typename T>
@@ -2129,7 +2169,7 @@ namespace mpl {
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param data pointer to the data to receive
       /// \param l memory layout of the data to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return request representing the ongoing receive operation
       template<typename T>
       irequest imrecv(T *data, const layout<T> &l, message_t &m) const {
@@ -2138,7 +2178,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Receives a message with a several values given by a pair of iterators via a
+      /// Receives a message with several values given by a pair of iterators via a
       /// non-blocking receive operation.
       /// \tparam iterT iterator type, must fulfill the requirements of a
       /// <a
@@ -2147,10 +2187,10 @@ namespace mpl {
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param begin iterator pointing to the first data value to receive
       /// \param end iterator pointing one element beyond the last data value to receive
-      /// \param m message handle of message to receive
+      /// \param m message handle of the message to receive
       /// \return request representing the ongoing message transfer
       /// \note This is a convenience method, which may have non-optimal performance
-      /// characteristics. Use alternative overloads in performance critical code sections.
+      /// characteristics. Use alternative overloads in performance-critical code sections.
       template<typename iterT>
       irequest imrecv(iterT begin, iterT end, message_t &m) const {
         using value_type = typename std::iterator_traits<iterT>::value_type;
@@ -2637,6 +2677,33 @@ namespace mpl {
         gatherv(root_rank, send_data, sendl, recv_data, recvls, displacements(size()));
       }
 
+      /// Gather messages with a variable amount of data from all processes at a single
+      /// root process.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the receiving process
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages, may be a null
+      /// pointer at non-root processes
+      /// \param recvls memory layouts of the data to receive by the root rank
+      /// \param recvdispls displacements of the data to receive by the root rank
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      void gatherv(int root_rank, const T *send_data, const contiguous_layout<T> &sendl,
+                   T *recv_data, const contiguous_layouts<T> &recvls,
+                   const displacements &recvdispls) const {
+        check_root(root_rank);
+        check_size(recvls);
+        check_size(recvdispls);
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto reacvdispls_int(count_displacements_as_vector_of_ints<T>(recvdispls));
+        MPI_Gatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                    recv_data, recvcounts.data(), reacvdispls_int.data(),
+                    detail::datatype_traits<T>::get_datatype(), root_rank, comm_);
+      }
+
       // --- non-blocking gather ---
       /// Gather messages with a variable amount of data from all processes at a single
       /// root process in a non-blocking manner.
@@ -2688,6 +2755,36 @@ namespace mpl {
         return igatherv(root_rank, send_data, sendl, recv_data, recvls, displacements(size()));
       }
 
+      /// Gather messages with a variable amount of data from all processes at a single
+      /// root process in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the receiving process
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages, may be a null
+      /// pointer at non-root processes
+      /// \param recvls memory layouts of the data to receive by the root rank
+      /// \param recvdispls displacements of the data to receive by the root rank
+      /// \return request representing the ongoing message transfer
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      irequest igatherv(int root_rank, const T *send_data, const contiguous_layout<T> &sendl,
+                        T *recv_data, const contiguous_layouts<T> &recvls,
+                        const displacements &recvdispls) const {
+        check_root(root_rank);
+        check_size(recvls);
+        check_size(recvdispls);
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto recvdispls_int(count_displacements_as_vector_of_ints<T>(recvdispls));
+        MPI_Request req;
+        MPI_Igatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                     recv_data, recvcounts.data(), recvdispls_int.data(),
+                     detail::datatype_traits<T>::get_datatype(), root_rank, comm_, &req);
+        return base_irequest{req};
+      }
+
       // --- blocking gather, non-root variant ---
       /// Gather messages with a variable amount of data from all processes at a single
       /// root process.
@@ -2708,6 +2805,23 @@ namespace mpl {
         sendls[root_rank] = sendl;
         alltoallv(send_data, sendls, sendrecvdispls, static_cast<T *>(nullptr),
                   mpl::layouts<T>(n), sendrecvdispls);
+      }
+
+      /// Gather messages with a variable amount of data from all processes at a single
+      /// root process.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the receiving process
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator. This particular overload can only be
+      /// called by non-root processes.
+      template<typename T>
+      void gatherv(int root_rank, const T *send_data, const contiguous_layout<T> &sendl) const {
+        check_nonroot(root_rank);
+        MPI_Gatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                    nullptr, nullptr, nullptr, MPI_DATATYPE_NULL, root_rank, comm_);
       }
 
       // --- non-blocking gather, non-root variant ---
@@ -2733,10 +2847,31 @@ namespace mpl {
                           mpl::layouts<T>(n), sendrecvdispls);
       }
 
+      /// Gather messages with a variable amount of data from all processes at a single
+      /// root process in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the receiving process
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \return request representing the ongoing message transfer
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator. This particular overload can only be
+      /// called by non-root processes.
+      template<typename T>
+      irequest igatherv(int root_rank, const T *send_data,
+                        const contiguous_layout<T> &sendl) const {
+        check_nonroot(root_rank);
+        MPI_Request req;
+        MPI_Igatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                     nullptr, nullptr, nullptr, MPI_DATATYPE_NULL, root_rank, comm_, &req);
+        return base_irequest{req};
+      }
+
       // === allgather ===
       // === get a single value from each rank and stores in contiguous memory
       // --- blocking allgather ---
-      /// Gather messages from all processes and distribute result to all processes.
+      /// Gather messages from all processes and distribute the result to all processes.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2749,7 +2884,7 @@ namespace mpl {
                       detail::datatype_traits<T>::get_datatype(), comm_);
       }
 
-      /// Gather messages from all processes and distribute result to all processes.
+      /// Gather messages from all processes and distribute the result to all processes.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2767,7 +2902,7 @@ namespace mpl {
       }
 
       // --- non-blocking allgather ---
-      /// Gather messages from all processes and distribute result to all processes in a
+      /// Gather messages from all processes and distribute the result to all processes in a
       /// non-blocking manner.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -2784,7 +2919,7 @@ namespace mpl {
         return base_irequest{req};
       }
 
-      /// Gather messages from all processes and distribute result to all processes in a
+      /// Gather messages from all processes and distribute the result to all processes in a
       /// non-blocking manner.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
@@ -2808,7 +2943,7 @@ namespace mpl {
       // === get varying amount of data from each rank and stores in non-contiguous memory
       // --- blocking allgather ---
       /// Gather messages with a variable amount of data from all processes and
-      /// distribute result to all processes.
+      /// distribute the result to all processes.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2830,7 +2965,7 @@ namespace mpl {
       }
 
       /// Gather messages with a variable amount of data from all processes and
-      /// distribute result to all processes.
+      /// distribute the result to all processes.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2845,9 +2980,34 @@ namespace mpl {
         allgatherv(send_data, sendl, recv_data, recvls, displacements(size()));
       }
 
+      /// Gather messages with a variable amount of data from all processes and
+      /// distribute the result to all processes.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvls memory layouts of the data to receive
+      /// \param recvdispls displacements of the data to receive
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      void allgatherv(const T *send_data, const contiguous_layout<T> &sendl, T *recv_data,
+                      const contiguous_layouts<T> &recvls,
+                      const displacements &recvdispls) const {
+        check_size(recvls);
+        check_size(recvdispls);
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto recvdispls_int(count_displacements_as_vector_of_ints<T>(recvdispls));
+        const std::vector<int> displs(recvdispls.begin(), recvdispls.end());
+        MPI_Allgatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                       recv_data, recvcounts.data(), recvdispls_int.data(),
+                       detail::datatype_traits<T>::get_datatype(), comm_);
+      }
+
       // --- non-blocking allgather ---
       /// Gather messages with a variable amount of data from all processes and
-      /// distribute result to all processes in a non-blocking manner.
+      /// distribute the result to all processes in a non-blocking manner.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2870,7 +3030,7 @@ namespace mpl {
       }
 
       /// Gather messages with a variable amount of data from all processes and
-      /// distribute result to all processes in a non-blocking manner.
+      /// distribute the result to all processes in a non-blocking manner.
       /// \tparam T type of the data to send, must meet the requirements as described in the
       /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
       /// \param send_data data to send
@@ -2884,6 +3044,33 @@ namespace mpl {
       irequest iallgatherv(const T *send_data, const layout<T> &sendl, T *recv_data,
                            const layouts<T> &recvls) const {
         return iallgatherv(send_data, sendl, recv_data, recvls, displacements(size()));
+      }
+
+      /// Gather messages with a variable amount of data from all processes and
+      /// distribute the result to all processes in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param send_data data to send
+      /// \param sendl memory layout of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvls memory layouts of the data to receive
+      /// \param recvdispls displacements of the data to receive
+      /// \return request representing the ongoing message transfer
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      irequest iallgatherv(const T *send_data, const contiguous_layout<T> &sendl, T *recv_data,
+                           const contiguous_layouts<T> &recvls,
+                           const displacements &recvdispls) const {
+        check_size(recvls);
+        check_size(recvdispls);
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto recvdispls_int(count_displacements_as_vector_of_ints<T>(recvdispls));
+        MPI_Request req;
+        MPI_Iallgatherv(send_data, sendl.size(), detail::datatype_traits<T>::get_datatype(),
+                        recv_data, recvcounts.data(), recvdispls_int.data(),
+                        detail::datatype_traits<T>::get_datatype(), comm_, &req);
+        return base_irequest{req};
       }
 
       // === scatter ===
@@ -3085,6 +3272,34 @@ namespace mpl {
         scatterv(root_rank, send_data, sendls, displacements(size()), recv_data, recvl);
       }
 
+      /// Scatter messages with a variable amount of data from a single root process to all
+      /// processes.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the sending process
+      /// \param send_data pointer to continuous storage for outgoing messages, may be a null
+      /// pointer at non-root processes
+      /// \param sendls memory layouts of the data to send
+      /// \param senddispls displacements of the data to send by the root rank
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvl memory layout of the data to receive by the root rank
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      void scatterv(int root_rank, const T *send_data, const contiguous_layouts<T> &sendls,
+                    const displacements &senddispls, T *recv_data,
+                    const contiguous_layout<T> &recvl) const {
+        check_root(root_rank);
+        check_size(sendls);
+        check_size(senddispls);
+        const auto sendcounts{sizes_as_vector_of_ints(sendls)};
+        const auto senddispls_int(count_displacements_as_vector_of_ints<T>(senddispls));
+        const std::vector<int> displs(senddispls.begin(), senddispls.end());
+        MPI_Scatterv(send_data, sendcounts.data(), senddispls_int.data(),
+                     detail::datatype_traits<T>::get_datatype(), recv_data, recvl.size(),
+                     detail::datatype_traits<T>::get_datatype(), root_rank, comm_);
+      }
+
       // --- non-blocking scatter ---
       /// Scatter messages with a variable amount of data from a single root process to all
       /// processes in a non-blocking manner.
@@ -3137,6 +3352,36 @@ namespace mpl {
         return iscatterv(root_rank, send_data, sendls, displacements(size()), recv_data, recvl);
       }
 
+      /// Scatter messages with a variable amount of data from a single root process to all
+      /// processes in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the sending process
+      /// \param send_data pointer to continuous storage for outgoing messages, may be a null
+      /// pointer at non-root processes
+      /// \param sendls memory layouts of the data to send
+      /// \param senddispls displacements of the data to send by the root rank
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvl memory layout of the data to receive by the root rank
+      /// \return request representing the ongoing message transfer
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      irequest iscatterv(int root_rank, const T *send_data, const contiguous_layouts<T> &sendls,
+                         const displacements &senddispls, T *recv_data,
+                         const contiguous_layout<T> &recvl) const {
+        check_root(root_rank);
+        check_size(sendls);
+        check_size(senddispls);
+        const auto sendcounts{sizes_as_vector_of_ints(sendls)};
+        const auto senddispls_int(count_displacements_as_vector_of_ints<T>(senddispls));
+        MPI_Request req;
+        MPI_Iscatterv(send_data, sendcounts.data(), senddispls_int.data(),
+                      detail::datatype_traits<T>::get_datatype(), recv_data, recvl.size(),
+                      detail::datatype_traits<T>::get_datatype(), root_rank, comm_, &req);
+        return base_irequest{req};
+      }
+
       // --- blocking scatter, non-root variant ---
       /// Scatter messages with a variable amount of data from a single root process to all
       /// processes.
@@ -3157,6 +3402,23 @@ namespace mpl {
         recvls[root_rank] = recvl;
         alltoallv(static_cast<const T *>(nullptr), mpl::layouts<T>(n), sendrecvdispls,
                   recv_data, recvls, sendrecvdispls);
+      }
+
+      /// Scatter messages with a variable amount of data from a single root process to all
+      /// processes.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the sending process
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvl memory layout of the data to receive by the root rank
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator. This particular overload can only be
+      /// called by non-root processes.
+      template<typename T>
+      void scatterv(int root_rank, T *recv_data, const contiguous_layout<T> &recvl) const {
+        check_root(root_rank);
+        MPI_Scatterv(nullptr, nullptr, nullptr, MPI_DATATYPE_NULL, recv_data, recvl.size(),
+                     detail::datatype_traits<T>::get_datatype(), root_rank, comm_);
       }
 
       // --- non-blocking scatter, non-root variant ---
@@ -3180,6 +3442,26 @@ namespace mpl {
         recvls[root_rank] = recvl;
         return ialltoallv(static_cast<const T *>(nullptr), mpl::layouts<T>(n), sendrecvdispls,
                           recv_data, recvls, sendrecvdispls);
+      }
+
+      /// Scatter messages with a variable amount of data from a single root process to all
+      /// processes in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param root_rank rank of the sending process
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvl memory layout of the data to receive by the root rank
+      /// \return request representing the ongoing message transfer
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator. This particular overload can only be
+      /// called by non-root processes.
+      template<typename T>
+      irequest iscatterv(int root_rank, T *recv_data, const contiguous_layout<T> &recvl) const {
+        check_root(root_rank);
+        MPI_Request req;
+        MPI_Iscatterv(nullptr, nullptr, nullptr, MPI_DATATYPE_NULL, recv_data, recvl.size(),
+                      detail::datatype_traits<T>::get_datatype(), root_rank, comm_, &req);
+        return base_irequest{req};
       }
 
       // === all-to-all ===
@@ -3313,8 +3595,8 @@ namespace mpl {
         check_size(recvdispls);
         check_size(recvls);
         const std::vector<int> counts(recvls.size(), 1);
-        const std::vector<int> senddispls_int(senddispls.begin(), senddispls.end());
-        const std::vector<int> recvdispls_int(recvdispls.begin(), recvdispls.end());
+        const auto senddispls_int{byte_displacements_as_vector_of_ints(senddispls)};
+        const auto recvdispls_int{byte_displacements_as_vector_of_ints(recvdispls)};
         static_assert(
             sizeof(decltype(*sendls())) == sizeof(MPI_Datatype),
             "compiler adds some unexpected padding, reinterpret cast will yield wrong results");
@@ -3322,6 +3604,46 @@ namespace mpl {
                       reinterpret_cast<const MPI_Datatype *>(sendls()), recv_data,
                       counts.data(), recvdispls_int.data(),
                       reinterpret_cast<const MPI_Datatype *>(recvls()), comm_);
+      }
+
+      /// Sends messages with a variable amount of data to all processes and receives
+      /// messages with a variable amount of data from all processes.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param send_data pointer to continuous storage for outgoing messages
+      /// \param sendls memory layouts of the data to send
+      /// \param senddispls displacements of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvls memory layouts of the data to receive
+      /// \param recvdispls displacements of the data to receive
+      /// \details Each process in the communicator sends elements of type \c T to each process
+      /// (including itself) and receives elements of type \c T from each process.  Send- and
+      /// receive-data are stored in consecutive blocks of variable size in the buffers
+      /// \c send_data and \c recv_data, respectively. The i-th memory block with the layout
+      /// <tt>sendls[i]</tt> in the array \c send_data starts \c senddispls[i] bytes after the address
+      /// given in send_data. The i-th memory block is sent to the i-th process. The i-th memory
+      /// block with the layout <tt>recvls[i]</tt> in the array recv_data starts \c recvdispls[i]
+      /// bytes after the address given in \c recv_data.  When the function has finished, the
+      /// i-th memory block in the array \c recv_data was received from the i-th process.
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      void alltoallv(const T *send_data, const contiguous_layouts<T> &sendls,
+                     const displacements &senddispls, T *recv_data,
+                     const contiguous_layouts<T> &recvls,
+                     const displacements &recvdispls) const {
+        check_size(senddispls);
+        check_size(sendls);
+        check_size(recvdispls);
+        check_size(recvls);
+        const auto sendcounts{sizes_as_vector_of_ints(sendls)};
+        const auto senddispls_as_int{count_displacements_as_vector_of_ints<T>(senddispls)};
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto recvdispls_as_int{count_displacements_as_vector_of_ints<T>(recvdispls)};
+        MPI_Alltoallv(send_data, sendcounts.data(), senddispls_as_int.data(),
+                      detail::datatype_traits<T>::get_datatype(), recv_data, recvcounts.data(),
+                      recvdispls_as_int.data(), detail::datatype_traits<T>::get_datatype(),
+                      comm_);
       }
 
       /// Sends messages with a variable amount of data to all processes and receives
@@ -3473,6 +3795,49 @@ namespace mpl {
           ialltoallv_task(send_data, recv_data, alltoall_state);
         });
         thread.detach();
+        return base_irequest{req};
+      }
+
+      /// Sends messages with a variable amount of data to all processes and receives
+      /// messages with a variable amount of data from all processes in a non-blocking manner.
+      /// \tparam T type of the data to send, must meet the requirements as described in the
+      /// \verbatim embed:rst:inline :doc:`data_types` \endverbatim section
+      /// \param send_data pointer to continuous storage for outgoing messages
+      /// \param sendls memory layouts of the data to send
+      /// \param senddispls displacements of the data to send
+      /// \param recv_data pointer to continuous storage for incoming messages
+      /// \param recvls memory layouts of the data to receive
+      /// \param recvdispls displacements of the data to receive
+      /// \return request representing the ongoing message transfer
+      /// \details Each process in the communicator sends elements of type \c T to each process
+      /// (including itself) and receives elements of type \c T from each process.  Send- and
+      /// receive-data are stored in consecutive blocks of variable size in the buffers
+      /// \c send_data and \c recv_data, respectively. The i-th memory block with the layout
+      /// <tt>sendls[i]</tt> in the array \c send_data starts \c senddispls[i] bytes after the address
+      /// given in send_data. The i-th memory block is sent to the i-th process. The i-th memory
+      /// block with the layout <tt>recvls[i]</tt> in the array \c recv_data starts \c recvdispls[i]
+      /// bytes after the address given in \c recv_data.  When the function has finished, the
+      /// i-th memory block in the array \c recv_data was received from the i-th process.
+      /// \note This is a collective operation and must be called (possibly by utilizing another
+      /// overload) by all processes in the communicator.
+      template<typename T>
+      irequest ialltoallv(const T *send_data, const contiguous_layouts<T> &sendls,
+                          const displacements &senddispls, T *recv_data,
+                          const contiguous_layouts<T> &recvls,
+                          const displacements &recvdispls) const {
+        check_size(senddispls);
+        check_size(sendls);
+        check_size(recvdispls);
+        check_size(recvls);
+        const auto sendcounts{sizes_as_vector_of_ints(sendls)};
+        const auto senddispls_as_int{count_displacements_as_vector_of_ints<T>(senddispls)};
+        const auto recvcounts{sizes_as_vector_of_ints(recvls)};
+        const auto recvdispls_as_int{count_displacements_as_vector_of_ints<T>(recvdispls)};
+        MPI_Request req;
+        MPI_Ialltoallv(send_data, sendcounts.data(), senddispls_as_int.data(),
+                       detail::datatype_traits<T>::get_datatype(), recv_data, recvcounts.data(),
+                       recvdispls_as_int.data(), detail::datatype_traits<T>::get_datatype(),
+                       comm_, &req);
         return base_irequest{req};
       }
 
@@ -4046,7 +4411,7 @@ namespace mpl {
     /// \param order affects the process ordering in the new communicator
     /// \note This is a collective operation that needs to be carried out by all processes of
     /// the local and the remote groups of  the inter-communicator \c other. The order parameter
-    /// must be the same for all process within in the local group as well as within the remote
+    /// must be the same for all processes within in the local group as well as within the remote
     /// group.  It should differ for both groups.
     explicit communicator(const inter_communicator &other, merge_order_type order);
 
@@ -5358,7 +5723,7 @@ namespace mpl {
     using base = communicator;
 
   public:
-    /// Creates a new communicator form an MPI communicator.
+    /// Creates a new communicator from an MPI communicator.
     /// \param comm MPI communicator that will be wrapped
     explicit mpi_communicator(MPI_Comm comm) : communicator{comm} {
     }
