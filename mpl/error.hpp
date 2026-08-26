@@ -3,103 +3,109 @@
 #define MPL_ERROR_HPP
 
 #include <exception>
+#include <stdexcept>
 
 
 namespace mpl {
 
   /// Base class for all MPL exception classes that will be thrown in case of run-time errors.
   class error : public ::std::exception {
-  private:
-    const char *const messsage_;
+    std::runtime_error message_;
 
   public:
+    error() : message_{""} {
+    }
+
     /// \param message error message that will be returned by #what method
-    explicit error(const char *const message = "unknown") : messsage_{message} {
+    explicit error(const std::string &message) : message_{message} {
+    }
+
+    /// \param message error message that will be returned by #what method
+    explicit error(const char *const message) : message_{message} {
     }
 
     /// \return character pointer to error message
     [[nodiscard]] const char *what() const noexcept override {
-      return messsage_;
+      return message_.what();
     }
   };
 
   /// Will be thrown in case of invalid rank argument.
-  class invalid_rank : public error {
+  class invalid_rank final : public error {
   public:
     invalid_rank() : error{"invalid rank"} {
     }
   };
 
   /// Will be thrown in case of invalid tag argument.
-  class invalid_tag : public error {
+  class invalid_tag final : public error {
   public:
     invalid_tag() : error{"invalid tag"} {
     }
   };
 
   /// Will be thrown in case of invalid size argument.
-  class invalid_size : public error {
+  class invalid_size final : public error {
   public:
     invalid_size() : error{"invalid size"} {
     }
   };
 
   /// Will be thrown in case of invalid count argument.
-  class invalid_count : public error {
+  class invalid_count final : public error {
   public:
     invalid_count() : error{"invalid count"} {
     }
   };
 
   /// Will be thrown in case of invalid count argument.
-  class invalid_displacement : public error {
+  class invalid_displacement final : public error {
   public:
     invalid_displacement() : error{"invalid displacement"} {
     }
   };
 
   /// Will be thrown in case of invalid layout argument.
-  class invalid_layout : public error {
+  class invalid_layout final : public error {
   public:
     invalid_layout() : error{"invalid layout"} {
     }
   };
 
   /// Will be thrown in case of invalid dimension.
-  class invalid_dim : public error {
+  class invalid_dim final : public error {
   public:
     invalid_dim() : error{"invalid dimension"} {
     }
   };
 
   /// Will be thrown when an error occurs while manipulating layouts.
-  class invalid_datatype_bound : public error {
+  class invalid_datatype_bound final : public error {
   public:
     invalid_datatype_bound() : error{"invalid datatype bound"} {
     }
   };
 
   /// Will be thrown in case of invalid arguments.
-  class invalid_argument : public error {
+  class invalid_argument final : public error {
   public:
     invalid_argument() : error{"invalid argument"} {
     }
   };
 
   /// Will be thrown in case of file-related io errors.
-  class io_failure : public error {
-    char message_[MPI_MAX_ERROR_STRING + 1]{};
+  class io_failure final : public error {
+    static std::string get_message(const int code) {
+      char message[MPI_MAX_ERROR_STRING + 1]{};
 
-  public:
-    explicit io_failure(int code) {
       int len{0};
-      MPI_Error_string(code, message_, &len);
-      message_[len] = '\0';
+      MPI_Error_string(code, message, &len);
+      message[len] = '\0';
+      return std::string{message};
     }
 
-    /// \return character pointer to error message
-    [[nodiscard]] const char *what() const noexcept override {
-      return message_;
+  public:
+    explicit io_failure(const int code) : error{get_message(code)} {
     }
   };
 
